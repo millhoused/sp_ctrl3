@@ -36,7 +36,7 @@ SHORTCUT:   In SQL Server Management Studio, go to Tools -> Options
             schema (with a dot) need to be enclosed in quotes for this
             to work in older versions of SSMS.
 
-VERSION:    2024-03-23
+VERSION:    2024-04-03
 
 */
 
@@ -740,8 +740,9 @@ SELECT c.[object_id], c.column_id, c.[name], c.user_type_id, c.system_type_id,
              WHEN st.[name] IN (N''decimal'', N''numeric'') AND c.[precision] BETWEEN 10 AND 19 THEN 9
              WHEN st.[name] IN (N''decimal'', N''numeric'') AND c.[precision] BETWEEN 20 AND 28 THEN 13
              WHEN st.[name] IN (N''decimal'', N''numeric'') AND c.[precision] BETWEEN 29 AND 38 THEN 17
-             WHEN st.[name] IN (N''real'', N''float'') AND c.[precision]<=24 THEN 4
-             WHEN st.[name] IN (N''real'', N''float'') AND c.[precision]>24 THEN 8
+             WHEN st.[name]=N''real'' THEN 4
+             WHEN st.[name]=N''float'' AND c.[precision]<=24 THEN 4
+             WHEN st.[name]=N''float'' AND c.[precision]>24 THEN 8
              WHEN st.[name]=N''time'' AND c.[scale] BETWEEN 0 AND 2 THEN 3
              WHEN st.[name]=N''time'' AND c.[scale] BETWEEN 3 AND 4 THEN 4
              WHEN st.[name]=N''time'' AND c.[scale] BETWEEN 5 AND 7 THEN 5
