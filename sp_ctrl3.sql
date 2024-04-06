@@ -36,7 +36,7 @@ SHORTCUT:   In SQL Server Management Studio, go to Tools -> Options
             schema (with a dot) need to be enclosed in quotes for this
             to work in older versions of SSMS.
 
-VERSION:    2024-04-03
+VERSION:    2024-04-06
 
 */
 
@@ -550,6 +550,14 @@ DECLARE @syspartitions TABLE (
     PRIMARY KEY CLUSTERED ([object_id], index_id, partition_number)
 );
 
+DECLARE @index_physical_stats TABLE (
+    [object_id]      int NOT NULL,
+    index_id         int NOT NULL,
+    partition_number int NOT NULL,
+    effective_fill_factor numeric(5, 2) NULL,
+    PRIMARY KEY CLUSTERED ([object_id], index_id, partition_number)
+);
+
 DECLARE @syspartitionstats TABLE (
     [partition_id]               bigint NOT NULL,
     row_count                    bigint NULL,
@@ -965,6 +973,23 @@ BEGIN TRY;
 END TRY
 BEGIN CATCH;
 	PRINT 'Problem compiling partition stats: '+ERROR_MESSAGE();
+END CATCH;
+
+
+
+
+BEGIN TRY;
+    SET @temp=N'
+    SELECT [object_id], index_id, partition_number,
+           ISNULL(SUM(avg_page_space_used_in_percent*page_count)/NULLIF(SUM(page_count), 0), 0)
+    FROM sys.dm_db_index_physical_stats('+CAST(@database_id AS nvarchar(10))+N', '+@object_id_str+N', DEFAULT, DEFAULT, ''SAMPLED'') AS ips
+    GROUP BY [object_id], index_id, partition_number';
+
+	INSERT INTO @index_physical_stats
+	EXEC(@temp);
+END TRY
+BEGIN CATCH;
+	PRINT 'Problem compiling physical index stats: '+ERROR_MESSAGE();
 END CATCH;
 
 
@@ -1884,21 +1909,23 @@ IF (@has_data=1 AND @rowcount>0)
 	       ds.[name]+ISNULL('('+pc.[name]+N')', N'') AS [Data space],
            ISNULL(ds2.[name], ds.[name]) AS [Filegroup],
 	       (CASE WHEN ix.[type_desc]!=N'HEAP' THEN STR(ISNULL(NULLIF(ix.fill_factor, 0), 100), 4, 0)+'%' ELSE '' END) AS [Fill factor],
+           ISNULL(STR(ips.effective_fill_factor, 4, 0)+'%', '') AS [Effective fill factor],
 
 	       --- The raw numbers:
 	       REPLACE(REPLACE(CONVERT(varchar(100), CAST(ISNULL(ps.row_count, p.[rows]) AS money), 1), ',', ' '), '.00', '') AS [Row count],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.reserved_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Reserved],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.in_row_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [In-row used],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.row_overflow_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Row-overflow used],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.lob_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Out-of-row used],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Total used],
-	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(100.0*ps.used_page_count/NULLIF(ps.reserved_page_count, 0), 0), 12, 2)+' %', '') AS [Total used %],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.reserved_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Reserved pages],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.in_row_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [In-row pages],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.row_overflow_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Row-overflow pages],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.lob_used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Out-of-row pages],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.used_page_count*8/1024, 0), 12, 2)+' MB', '') AS [Total pages used],
+	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(100.0*ps.used_page_count/NULLIF(ps.reserved_page_count, 0), 0), 12, 2)+' %', '') AS [Pages used/reserved, %],
 	       (CASE WHEN ps.[partition_id] IS NULL THEN 'n/a' ELSE '' END)+ISNULL(STR(NULLIF(1.0*ps.used_page_count*8*1024/NULLIF(ISNULL(ps.row_count, p.[rows]), 0), 0), 12, 1)+' B', '') AS [Avg. row size],
            ISNULL(STR(NULLIF(1.0*cs1.size_in_bytes/1024/1024, 0), 12, 2)+' MB', '') AS [CS open],
            ISNULL(STR(NULLIF(1.0*cs2.size_in_bytes/1024/1024, 0), 12, 2)+' MB', '') AS [CS closed],
            ISNULL(STR(NULLIF(1.0*cs3.size_in_bytes/1024/1024, 0), 12, 2)+' MB', '') AS [CS compressed]
 	FROM @syspartitionstats AS ps
 	RIGHT JOIN @syspartitions AS p ON ps.[partition_id]=p.[partition_id]
+    LEFT JOIN @index_physical_stats AS ips ON ips.[object_id]=@object_id AND ips.index_id=p.index_id AND ips.partition_number=p.partition_number
 	LEFT JOIN @sysindexes AS ix ON p.[object_id]=ix.[object_id] AND p.index_id=ix.index_id
 	--- Data space is either a file group or a partition function:
 	LEFT JOIN @sysdataspaces AS ds ON ix.data_space_id=ds.data_space_id
