@@ -104,9 +104,8 @@ WHILE (@synonym_references IS NOT NULL) BEGIN;
     SELECT @database_id=database_id, @database=QUOTENAME([name]), @compatibility_level=[compatibility_level]
     FROM sys.databases
     WHERE @objname LIKE N'#%' AND [name]=N'tempdb' OR
-        @objname LIKE N'\[%\].%' ESCAPE N'\' AND @objname LIKE N'%.%.%' AND [name]=SUBSTRING(@objname, 2, NULLIF(CHARINDEX(N'].', @objname), 0)-2) OR
-        @objname NOT LIKE N'[\[#]%' ESCAPE N'\' AND @objname LIKE N'%.%.%' AND [name]=LEFT(@objname, NULLIF(CHARINDEX(N'.', @objname), 0)-1) OR
-        @objname NOT LIKE N'%.%.%' AND @objname NOT LIKE N'#%' AND database_id=DB_ID();
+          [name]=PARSENAME(@objname, 3) OR
+          @objname NOT LIKE N'#%' AND database_id=DB_ID() AND PARSENAME(@objname, 3) IS NULL;
 
     SET @object_id_str=CAST(@object_id AS nvarchar(20));
 
